@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+:root {
+  --font-ui:   'IBM Plex Sans', system-ui, sans-serif;
+  --font-data: 'IBM Plex Mono', monospace;
+
+  --bg-base:     #f8f7f5;
+  --bg-surface:  #ffffff;
+  --border:      #e5e2dd;
+  --text-primary:   #0f0f0e;
+  --text-secondary: #6b6763;
+  --text-muted:     #9b9795;
+
+  --score-high-bg: #0f0f0e; --score-high-text: #ffffff;
+  --score-med-bg:  #e8e5e0; --score-med-text:  #0f0f0e;
+  --score-low-bg:  #f0ede8; --score-low-text:  #9b9795;
+
+  --tag-divorce-bg: #fff1f0; --tag-divorce-text: #c53030;
+  --tag-code-bg:    #fffbeb; --tag-code-text:    #92400e;
+  --tag-tax-bg:     #eff6ff; --tag-tax-text:     #1e40af;
+  --tag-vacant-bg:  #f0fdf4; --tag-vacant-text:  #166534;
+  --tag-nod-bg:     #fff1f0; --tag-nod-text:     #c53030;
+  --tag-absentee-bg:#fdf4ff; --tag-absentee-text:#7e22ce;
+  --tag-trust-bg:   #fefce8; --tag-trust-text:   #854d0e;
+
+  --space-1: 4px;  --space-2: 8px;   --space-3: 12px;
+  --space-4: 16px; --space-6: 24px;  --space-8: 32px;
+
+  --background: var(--bg-base);
+  --foreground: var(--text-primary);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+}
