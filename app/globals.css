@@ -21,7 +21,8 @@
   --tag-vacant-bg:  #f0fdf4; --tag-vacant-text:  #166534;
   --tag-nod-bg:     #fff1f0; --tag-nod-text:     #c53030;
   --tag-absentee-bg:#fdf4ff; --tag-absentee-text:#7e22ce;
-  --tag-trust-bg:   #fefce8; --tag-trust-text:   #854d0e;
+  --tag-trust-bg:       #fefce8; --tag-trust-text:       #854d0e;
+  --tag-bankruptcy-bg:  #fff7ed; --tag-bankruptcy-text:  #c2410c;
 
   --space-1: 4px;  --space-2: 8px;   --space-3: 12px;
   --space-4: 16px; --space-6: 24px;  --space-8: 32px;

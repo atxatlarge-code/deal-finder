@@ -4,6 +4,7 @@ export type SignalType =
   | 'DIVORCE'
   | 'FORECLOSURE'
   | 'VACANT'
+  | 'BANKRUPTCY'
 
 export type OwnershipType = 'INDIVIDUAL' | 'LLC' | 'TRUST' | 'ESTATE' | 'OTHER'
 

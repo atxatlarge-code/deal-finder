@@ -14,6 +14,7 @@ export const SCORE_VERSION = 'v1'
 export const SIGNAL_WEIGHTS: Record<string, number> = {
   FORECLOSURE:      40,
   DIVORCE:          35,
+  BANKRUPTCY:       35,
   TAX_DELINQUENCY:  30,
   CODE_VIOLATION:   20,
   VACANT:           15,
