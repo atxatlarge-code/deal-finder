@@ -2,18 +2,10 @@
 /**
  * One-time historical backfill: imports TXNB bankruptcy filings from
  * CourtListener into the signals table.
- *
- * Usage:
- *   bun scripts/import-bankruptcy.ts [--days-back 90] [--dry-run] [--limit N]
- *
- * Cursor-paginates over dockets, fetches debtor parties, matches to Dallas
- * County properties, and upserts BANKRUPTCY signals.
- * Prints progress every 100 dockets so it can be interrupted and resumed
- * by adjusting --days-back.
+ * * FUZZY MATCH VERSION: Strips suffixes like LLC/INC to increase match rates.
  */
 
 import { sql } from 'bun'
-import { fetchDebtorParties, parseDebtorAddress } from '../lib/courtlistener'
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -68,27 +60,31 @@ function esc(s: string | null): string {
 }
 
 /**
- * Match a street address to a property_id via direct Postgres queries.
- * Exact UPPER() match first; prefix 10-char fallback.
+ * Fuzzy Match: Normalizes names to increase hit rates in the properties table.
  */
-async function matchProperty(address: string): Promise<string | null> {
-  const upper = address.toUpperCase()
+async function matchPropertyByOwner(name: string): Promise<string | null> {
+  // 1. Clean the name: Upper case, remove punctuation, strip common entity suffixes
+  const clean = name
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, '') // Remove everything except letters, numbers, and spaces
+    .replace(/\b(LLC|L L C|INC|INCORPORATED|CORP|CORPORATION|LTD|LIMITED|LP|PLC|COMPANY|CO)\b/g, '')
+    .trim();
 
-  const exact = await sql.unsafe<{ id: string }[]>(`
-    SELECT id FROM properties
-    WHERE UPPER(property_address) = ${esc(upper)}
-    LIMIT 1
-  `)
-  if (exact[0]) return exact[0].id
+  // If the name is too short after cleaning (like "A LLC"), skip to avoid false positives
+  if (clean.length < 3) return null;
 
-  const prefix = upper.slice(0, 10)
-  const prefixRows = await sql.unsafe<{ id: string }[]>(`
-    SELECT id FROM properties
-    WHERE LEFT(UPPER(property_address), 10) = ${esc(prefix)}
-    ORDER BY property_address
+  // 2. Search for the cleaned "base name" within your owner_name column
+  const row = await sql.unsafe<{ id: string, owner_name: string }[]>(`
+    SELECT id, owner_name FROM properties
+    WHERE UPPER(owner_name) ILIKE ${esc('%' + clean + '%')}
     LIMIT 1
-  `)
-  return prefixRows[0]?.id ?? null
+  `);
+  
+  if (row[0]) {
+    console.log(`    ✓ MATCHED: "${name}" matches DB owner "${row[0].owner_name}"`);
+    return row[0].id;
+  }
+  return null;
 }
 
 async function upsertSignal(
@@ -123,18 +119,18 @@ async function upsertSignal(
 // ---------------------------------------------------------------------------
 
 async function main() {
-  console.log('Bankruptcy backfill — CourtListener TXNB')
+  console.log('Bankruptcy backfill — CourtListener TXNB (Fuzzy Mode)')
   console.log(`  Days back: ${daysBack}`)
-  if (dryRun) console.log('  DRY RUN — no DB writes')
+  if (dryRun) console.log('  DRY RUN — Checking DB for matches but not writing signals')
   if (limit !== Infinity) console.log(`  Limit: ${limit} dockets`)
   console.log('')
 
   const since = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000)
     .toISOString()
-    .slice(0, 10) // YYYY-MM-DD
+    .slice(0, 10)
 
   let nextUrl: string | null =
-    `${BASE}/dockets/?court=txnb&date_filed__gte=${since}&order_by=date_filed&page_size=100`
+    `${BASE}/dockets/?court__id=txnb&date_filed__range=${since},2099-01-01&page_size=20`
 
   let totalDockets = 0
   let matched = 0
@@ -142,65 +138,43 @@ async function main() {
   let errors = 0
 
   while (nextUrl && totalDockets < limit) {
+    console.log(`  Fetching page: ${nextUrl}`);
     const res = await fetch(nextUrl, { headers: clHeaders() })
+    
     if (!res.ok) {
-      console.error(`Fetch error: ${res.status} ${res.statusText}`)
+      const errorText = await res.text().catch(() => 'No error body');
+      console.error(`Fetch error: ${res.status} ${res.statusText}`);
+      console.error(`Details: ${errorText.slice(0, 500)}`);
       break
     }
+    
     const page: DocketListResponse = await res.json()
 
     for (const docket of page.results) {
       if (totalDockets >= limit) break
       totalDockets++
 
-      let parties
-      try {
-        parties = await fetchDebtorParties(docket.id)
-      } catch (err) {
-        console.error(`  Docket ${docket.id} parties error:`, err)
-        errors++
-        continue
+      const debtorName = docket.case_name;
+      
+      // We check the database even in Dry Run to verify matching logic
+      const propertyId = await matchPropertyByOwner(debtorName);
+
+      if (propertyId) {
+        matched++;
+        if (!dryRun) {
+          try {
+            await upsertSignal(propertyId, docket);
+          } catch (err) {
+            console.error(`  Error upserting ${docket.docket_number}:`, err);
+            errors++;
+          }
+        }
+      } else {
+        skipped++;
       }
 
-      let docketMatched = false
-      for (const party of parties) {
-        const address = parseDebtorAddress(party.extra_info)
-        if (!address) continue
-
-        const propertyId = dryRun ? null : await matchProperty(address)
-
-        if (dryRun) {
-          console.log({
-            docket_number: docket.docket_number,
-            date_filed: docket.date_filed,
-            debtor: party.name,
-            address,
-          })
-          matched++
-          docketMatched = true
-          continue
-        }
-
-        if (!propertyId) {
-          skipped++
-          continue
-        }
-
-        try {
-          await upsertSignal(propertyId, docket)
-          matched++
-          docketMatched = true
-        } catch (err) {
-          console.error(`  Signal upsert error for ${docket.docket_number}:`, err)
-          errors++
-        }
-      }
-
-      if (!docketMatched && !dryRun) skipped++
-
-      // Progress checkpoint every 100 dockets
       if (totalDockets % 100 === 0) {
-        console.log(`  [${totalDockets}] matched: ${matched}, skipped: ${skipped}, errors: ${errors}`)
+        console.log(`  [${totalDockets}] found: ${totalDockets}, matched in DB: ${matched}, skipped: ${skipped}`)
       }
     }
 
@@ -210,7 +184,7 @@ async function main() {
   console.log('')
   console.log('--- Summary ---')
   console.log(`  Dockets processed: ${totalDockets}`)
-  console.log(`  Matched:           ${matched}`)
+  console.log(`  Matched in DB:     ${matched}`)
   console.log(`  Skipped:           ${skipped}`)
   console.log(`  Errors:            ${errors}`)
 }

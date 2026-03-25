@@ -23,8 +23,10 @@ function buildReasons(lead: HotLead): string[] {
   const sorted = [...lead.signal_types].sort(
     (a, b) => (SIGNAL_WEIGHTS[b] ?? 0) - (SIGNAL_WEIGHTS[a] ?? 0)
   )
+  
   for (const type of sorted) {
     const label: Record<string, string> = {
+      BANKRUPTCY:      'bankruptcy filing', // Added for the new TXNB signals
       FORECLOSURE:     'foreclosure filing',
       DIVORCE:         'divorce filing',
       TAX_DELINQUENCY: 'tax delinquent',
@@ -52,21 +54,29 @@ const SCORE_STYLES = {
   low:  { bg: 'var(--score-low-bg)',  text: 'var(--score-low-text)' },
 }
 
+// Custom theme for Bankruptcy leads to make them "pop"
+const BANKRUPTCY_STYLE = {
+  border: '1px solid #f59e0b', // Amber-500
+  background: 'rgba(245, 158, 11, 0.05)',
+  badge: { bg: '#f59e0b', text: '#fff' }
+}
+
 export default function HotLeads({ leads }: { leads: HotLead[] }) {
   if (leads.length === 0) return null
 
   return (
     <section className="mb-8">
-      <p style={{
-        fontSize: '0.7rem',
-        fontWeight: 600,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        color: 'var(--text-muted)',
-        marginBottom: '10px',
-      }}>
-        Hot Leads
-      </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+        <p style={{
+          fontSize: '0.7rem',
+          fontWeight: 600,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: 'var(--text-muted)',
+        }}>
+          Hot Leads
+        </p>
+      </div>
 
       <div style={{
         display: 'grid',
@@ -77,6 +87,7 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
           const band = scoreBand(lead.score)
           const scoreStyle = SCORE_STYLES[band]
           const reasons = buildReasons(lead)
+          const isBankruptcy = lead.signal_types.includes('BANKRUPTCY')
 
           return (
             <Link
@@ -86,18 +97,33 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
             >
               <div
                 style={{
-                  background: 'var(--bg-surface)',
-                  border: '1px solid var(--border)',
+                  background: isBankruptcy ? BANKRUPTCY_STYLE.background : 'var(--bg-surface)',
+                  border: isBankruptcy ? BANKRUPTCY_STYLE.border : '1px solid var(--border)',
                   borderRadius: '10px',
                   padding: '16px',
                   cursor: 'pointer',
-                  transition: 'border-color 0.15s',
+                  transition: 'all 0.15s ease-in-out',
+                  position: 'relative',
+                  overflow: 'hidden'
                 }}
-                onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--text-muted)')}
-                onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+                onMouseEnter={e => (e.currentTarget.style.borderColor = isBankruptcy ? '#d97706' : 'var(--text-muted)')}
+                onMouseLeave={e => (e.currentTarget.style.borderColor = isBankruptcy ? BANKRUPTCY_STYLE.border : 'var(--border)')}
               >
+                {/* Visual indicator for Bankruptcy */}
+                {isBankruptcy && (
+                  <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    right: 0,
+                    width: '40px',
+                    height: '40px',
+                    background: 'linear-gradient(45deg, transparent 50%, #f59e0b 50%)',
+                    opacity: 0.8
+                  }} />
+                )}
+
                 {/* Score */}
-                <div style={{ marginBottom: '10px' }}>
+                <div style={{ marginBottom: '10px', display: 'flex', gap: '6px', alignItems: 'center' }}>
                   <span style={{
                     display: 'inline-block',
                     padding: '3px 10px',
@@ -110,6 +136,18 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
                   }}>
                     {lead.score}
                   </span>
+                  
+                  {isBankruptcy && (
+                    <span style={{
+                      fontSize: '0.6rem',
+                      fontWeight: 800,
+                      textTransform: 'uppercase',
+                      color: '#b45309',
+                      letterSpacing: '0.02em'
+                    }}>
+                      High Intent
+                    </span>
+                  )}
                 </div>
 
                 {/* Address */}
@@ -137,20 +175,23 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
 
                 {/* Reason tags */}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                  {reasons.map((r) => (
-                    <span key={r} style={{
-                      display: 'inline-block',
-                      padding: '2px 7px',
-                      borderRadius: '9999px',
-                      fontSize: '0.65rem',
-                      fontWeight: 600,
-                      background: 'var(--bg-base)',
-                      color: 'var(--text-secondary)',
-                      border: '1px solid var(--border)',
-                    }}>
-                      {r}
-                    </span>
-                  ))}
+                  {reasons.map((r) => {
+                    const isBankruptcyTag = r === 'bankruptcy filing';
+                    return (
+                      <span key={r} style={{
+                        display: 'inline-block',
+                        padding: '2px 7px',
+                        borderRadius: '9999px',
+                        fontSize: '0.65rem',
+                        fontWeight: 600,
+                        background: isBankruptcyTag ? '#fef3c7' : 'var(--bg-base)',
+                        color: isBankruptcyTag ? '#92400e' : 'var(--text-secondary)',
+                        border: isBankruptcyTag ? '1px solid #fcd34d' : '1px solid var(--border)',
+                      }}>
+                        {r}
+                      </span>
+                    )
+                  })}
                 </div>
               </div>
             </Link>
