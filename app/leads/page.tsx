@@ -268,7 +268,13 @@ export default async function LeadsPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth/login')
 
-  const { type, absentee, scored, page } = await searchParams
+    // filters and presets
+  const params = await searchParams;
+  const type = params.type;
+  const page = params.page;
+  const scored = params.scored ?? '1';
+  const absentee = params.absentee ?? '1';
+
   const currentPage = Math.max(1, parseInt(page ?? '1', 10))
 
   const [{ data: properties, count }, hotLeads] = await Promise.all([
