@@ -4,22 +4,25 @@ on:
   schedule:
     # Runs at 07:00 UTC (2:00 AM Dallas Time)
     - cron: '0 7 * * *'
-  workflow_dispatch: # Allows you to trigger it manually for testing
+  workflow_dispatch: # Allows manual trigger
+
+# THIS SILENCES THE WARNING:
+# It forces all actions to run on the newer Node 24 engine immediately
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        # UPGRADED from v4 to v6 (Supports Node 24 natively)
+        uses: actions/checkout@v6
       
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-
-      - name: Install Dependencies
-        run: bun install
 
       - name: Run Bankruptcy Import
         run: bun scripts/import-bankruptcy.ts --days-back 2
@@ -28,7 +31,6 @@ jobs:
           COURTLISTENER_TOKEN: ${{ secrets.COURTLISTENER_TOKEN }}
 
       - name: Trigger AI Scoring
-        # This calls your API route to re-score the new leads
         run: |
-          curl -X POST https://deal-finder-plum.vercel.app/api/cron/score \
+          curl -X POST https://YOUR-ACTUAL-DOMAIN.com/api/cron/score \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
