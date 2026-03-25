@@ -28,9 +28,8 @@ Always use `bun`. Never use `npm`, `yarn`, or `pnpm`.
 ## Key Architectural Decisions
 
 ### Middleware
-Standard `middleware.ts` (not `proxy.ts`) is required for Vercel deployment.
-Next.js 16 locally warns about using `middleware` vs `proxy` naming — **ignore this warning**.
-The file must export `async function middleware(request: NextRequest)`.
+`proxy.ts` with `export function proxy(request: NextRequest)` is required for Next.js 16 + Vercel.
+The old `middleware.ts` convention causes `MIDDLEWARE_INVOCATION_FAILED` on Vercel Edge runtime.
 
 ### Supabase Clients
 - **Server pages / route handlers (auth-gated):** `createClient()` from `@/lib/supabase/server` — uses cookies, respects RLS
@@ -209,7 +208,7 @@ scripts/
   import-bankruptcy.ts        # CourtListener TXNB → BANKRUPTCY signals (one-time backfill)
 
 types/index.ts                # Property, Signal, LeadScore, SignalType, OwnershipType, etc.
-middleware.ts                 # Route protection (calls updateSession)
+proxy.ts                      # Route protection (cookie-based auth check)
 supabase/schema.sql           # Full DB schema
 vercel.json                   # Cron config
 ```
@@ -252,7 +251,7 @@ Test framework: Vitest (jsdom) + Playwright (chromium, baseURL localhost:3000)
 
 5. **Stale `unstable_cache`** — delete `.next/cache` directory to bust cache during development when data changes aren't reflecting.
 
-6. **Middleware naming** — `middleware.ts` (not `proxy.ts`) is required for Vercel. Next.js 16 locally prefers `proxy.ts` but Vercel requires the standard name. The local deprecation warning is safe to ignore.
+6. **Middleware naming** — `proxy.ts` with `export function proxy()` is required for Next.js 16 + Vercel. Using `middleware.ts` causes `MIDDLEWARE_INVOCATION_FAILED` on Vercel Edge runtime. Also avoid importing from `@supabase/ssr` in proxy.ts — it uses `__dirname` internally and breaks Edge runtime.
 
 ---
 

@@ -26,7 +26,7 @@ function buildReasons(lead: HotLead): string[] {
   
   for (const type of sorted) {
     const label: Record<string, string> = {
-      BANKRUPTCY:      'bankruptcy filing', // Added for the new TXNB signals
+      BANKRUPTCY:      'bankruptcy filing', 
       FORECLOSURE:     'foreclosure filing',
       DIVORCE:         'divorce filing',
       TAX_DELINQUENCY: 'tax delinquent',
@@ -54,9 +54,8 @@ const SCORE_STYLES = {
   low:  { bg: 'var(--score-low-bg)',  text: 'var(--score-low-text)' },
 }
 
-// Custom theme for Bankruptcy leads to make them "pop"
 const BANKRUPTCY_STYLE = {
-  border: '1px solid #f59e0b', // Amber-500
+  border: '1px solid #f59e0b', 
   background: 'rgba(245, 158, 11, 0.05)',
   badge: { bg: '#f59e0b', text: '#fff' }
 }
@@ -64,26 +63,31 @@ const BANKRUPTCY_STYLE = {
 export default function HotLeads({ leads }: { leads: HotLead[] }) {
   if (leads.length === 0) return null
 
+  // --- THE CHANGE IS HERE ---
+  // This ensures we only show the top 10 leads, even if the parent sends more
+  const displayLeads = leads.slice(0, 10)
+
   return (
     <section className="mb-8">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
         <p style={{
-          fontSize: '0.7rem',
-          fontWeight: 600,
-          letterSpacing: '0.06em',
+          fontSize: '0.75rem', // Slightly larger for the "Top 10" header
+          fontWeight: 700,
+          letterSpacing: '0.08em',
           textTransform: 'uppercase',
           color: 'var(--text-muted)',
         }}>
-          Hot Leads
+          Top 10 High-Intent Leads
         </p>
       </div>
 
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+        // Changed minmax from 240px to 220px to fit 10 cards more densely
+        gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
         gap: '10px',
       }}>
-        {leads.map((lead) => {
+        {displayLeads.map((lead) => { // Changed leads.map to displayLeads.map
           const band = scoreBand(lead.score)
           const scoreStyle = SCORE_STYLES[band]
           const reasons = buildReasons(lead)
@@ -101,6 +105,7 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
                   border: isBankruptcy ? BANKRUPTCY_STYLE.border : '1px solid var(--border)',
                   borderRadius: '10px',
                   padding: '16px',
+                  height: '100%', // Ensure cards stay same height in the row
                   cursor: 'pointer',
                   transition: 'all 0.15s ease-in-out',
                   position: 'relative',
@@ -109,7 +114,6 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
                 onMouseEnter={e => (e.currentTarget.style.borderColor = isBankruptcy ? '#d97706' : 'var(--text-muted)')}
                 onMouseLeave={e => (e.currentTarget.style.borderColor = isBankruptcy ? BANKRUPTCY_STYLE.border : 'var(--border)')}
               >
-                {/* Visual indicator for Bankruptcy */}
                 {isBankruptcy && (
                   <div style={{
                     position: 'absolute',
@@ -122,7 +126,6 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
                   }} />
                 )}
 
-                {/* Score */}
                 <div style={{ marginBottom: '10px', display: 'flex', gap: '6px', alignItems: 'center' }}>
                   <span style={{
                     display: 'inline-block',
@@ -150,7 +153,6 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
                   )}
                 </div>
 
-                {/* Address */}
                 <p style={{
                   fontWeight: 600,
                   fontSize: '0.875rem',
@@ -161,19 +163,16 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
                   {lead.property_address}
                 </p>
 
-                {/* Owner */}
                 <p style={{
                   fontSize: '0.75rem',
                   color: 'var(--text-muted)',
                   marginBottom: '12px',
                   overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 }}>
                   {lead.owner_name ?? '—'}
                 </p>
 
-                {/* Reason tags */}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                   {reasons.map((r) => {
                     const isBankruptcyTag = r === 'bankruptcy filing';

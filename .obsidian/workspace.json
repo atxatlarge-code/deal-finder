@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "TODOS.md",
+                "file": "docs/plan-recap-bankruptcy.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "TODOS"
+              "title": "plan-recap-bankruptcy"
             }
           }
         ]
@@ -94,6 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
+                "file": "public/file.svg",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -103,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks"
+              "title": "Backlinks for file"
             }
           },
           {
@@ -112,11 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
+                "file": "public/file.svg",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links"
+              "title": "Outgoing links from file"
             }
           },
           {
@@ -154,13 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "Notes.md",
+                "file": "public/file.svg",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of Notes"
+              "title": "Outline of file"
             }
           }
         ]
@@ -181,24 +183,27 @@
       "bases:Create new base": false
     }
   },
-  "active": "eba41b8fee35cd18",
+  "active": "9d9f80ef2b489ebb",
   "lastOpenFiles": [
-    "app/leads/_components/HotLeads.tsx",
-    "lib/scoring.ts",
-    "scripts/refresh-signals.ts",
-    "scripts/import-signals.ts",
-    "app/leads/_components/FilterBar.tsx",
-    "app/leads/_components",
-    "scripts/import-dcad-values.ts",
-    "scripts/import-dcad.ts",
-    "scripts",
-    "node_modules/csv-parse/lib/utils/underscore.js",
-    "node_modules/csv-parse/lib/utils/is_object.js",
-    "node_modules/csv-parse/README.md",
+    "proxy.ts",
+    "scripts/import-bankruptcy.ts",
+    "app/api/webhooks/courtlistener/route.ts",
+    "app/api/webhooks/courtlistener",
+    "app/api/webhooks",
+    "lib/courtlistener.ts",
+    "public/file.svg",
+    "public/globe.svg",
     "TODOS.md",
-    "Notes.md",
     "README.md",
     "CLAUDE.md",
+    "AGENTS.md",
+    "scripts/import-life-events.ts",
+    "Notes.md",
+    "middleware.ts",
+    "vercel.json",
+    "app/leads/_components/HotLeads.tsx",
+    "lib/scoring.ts",
+    "node_modules/csv-parse/README.md",
     "node_modules/@babel/helper-compilation-targets/node_modules/lru-cache/README.md",
     "node_modules/prop-types/node_modules/react-is/README.md",
     "node_modules/assertion-error/README.md",
@@ -218,7 +223,6 @@
     "node_modules/tr46/README.md",
     "node_modules/tr46/LICENSE.md",
     "node_modules/tldts/README.md",
-    "node_modules/xmlchars/README.md",
     "node_modules/playwright-core/lib/vite/traceViewer/playwright-logo.svg",
     "node_modules/playwright-core/lib/vite/recorder/playwright-logo.svg",
     "node_modules/playwright-core/lib/server/chromium/appIcon.png",
@@ -226,8 +230,6 @@
     "node_modules/@supabase/phoenix/priv/static/phoenix-orange.png",
     "public/window.svg",
     "public/vercel.svg",
-    "public/next.svg",
-    "public/globe.svg",
-    "public/file.svg"
+    "public/next.svg"
   ]
 }

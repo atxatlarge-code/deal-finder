@@ -151,7 +151,7 @@ async function fetchHotLeads(): Promise<HotLead[]> {
 
   const top = [...latest.entries()]
     .sort((a, b) => b[1].score - a[1].score)
-    .slice(0, 6)
+    .slice(0, 10)
 
   if (top.length === 0) return []
 
