@@ -1,0 +1,34 @@
+name: Daily Bankruptcy Sync & Scoring
+
+on:
+  schedule:
+    # Runs at 07:00 UTC (2:00 AM Dallas Time)
+    - cron: '0 7 * * *'
+  workflow_dispatch: # Allows you to trigger it manually for testing
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Dependencies
+        run: bun install
+
+      - name: Run Bankruptcy Import
+        run: bun scripts/import-bankruptcy.ts --days-back 2
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          COURTLISTENER_TOKEN: ${{ secrets.COURTLISTENER_TOKEN }}
+
+      - name: Trigger AI Scoring
+        # This calls your API route to re-score the new leads
+        run: |
+          curl -X POST https://deal-finder-plum.vercel.app/api/cron/score \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
