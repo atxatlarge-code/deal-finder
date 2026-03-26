@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { scoreBand, SIGNAL_WEIGHTS } from '@/lib/scoring'
+import { scoreBand } from '@/lib/scoring'
+import { Zap, AlertTriangle } from 'lucide-react'
 
 export type HotLead = {
   id: string
@@ -14,37 +15,10 @@ export type HotLead = {
   signal_count: number
   signal_types: string[]
   is_emergency?: boolean 
+  has_city_pressure?: boolean 
 }
 
-function buildReasons(lead: HotLead): string[] {
-  const reasons: string[] = []
-  
-  // 1. Emergency Flag
-  if (lead.is_emergency) {
-    reasons.push('🚨 EMERGENCY: SUBSTANDARD');
-  }
-
-  // 2. Map signals
-  for (const type of lead.signal_types) {
-    if (type === 'BANKRUPTCY') reasons.push('bankruptcy filing');
-    if (type === 'CODE_VIOLATION' && !lead.is_emergency) {
-       reasons.push(`${lead.signal_count} code violations`);
-    }
-  }
-
-  // 3. RESTORED: Absentee Check
-  if (lead.is_absentee) {
-    reasons.push('absentee owner');
-  }
-
-  // 4. Ownership Details
-  if (lead.ownership_type === 'ESTATE')  reasons.push('estate sale')
-  else if (lead.ownership_type === 'TRUST') reasons.push('trust-owned')
-  else if (lead.ownership_type === 'LLC')   reasons.push('LLC-owned')
-
-  return reasons
-}
-
+// --- CONSTANTS (RESTORED) ---
 const SCORE_STYLES = {
   high: { bg: 'var(--score-high-bg)', text: 'var(--score-high-text)' },
   med:  { bg: 'var(--score-med-bg)',  text: 'var(--score-med-text)' },
@@ -64,11 +38,35 @@ const EMERGENCY_STYLE = {
   badge: { bg: '#fee2e2', text: '#991b1b', border: '#fecaca' }
 }
 
-// New Blue style for Absentee
 const ABSENTEE_STYLE = {
   bg: '#e0f2fe',
   text: '#0369a1',
   border: '#bae6fd'
+}
+
+function buildReasons(lead: HotLead): string[] {
+  const reasons: string[] = []
+  
+  if (lead.is_emergency || lead.signal_types.includes('EMERGENCY')) {
+    reasons.push('🚨 EMERGENCY: CCS');
+  }
+
+  if (lead.signal_count > 2) {
+    reasons.push('HIGH ENFORCEMENT');
+  }
+
+  for (const type of lead.signal_types) {
+    if (type === 'BANKRUPTCY') reasons.push('bankruptcy');
+    if (type === 'CODE_VIOLATION' && !lead.is_emergency) {
+       reasons.push(`CCS: ${lead.signal_count} CASES`);
+    }
+  }
+
+  if (lead.is_absentee) reasons.push('absentee');
+  if (lead.ownership_type === 'ESTATE') reasons.push('estate')
+  else if (lead.ownership_type === 'TRUST') reasons.push('trust')
+
+  return reasons
 }
 
 export default function HotLeads({ leads }: { leads: HotLead[] }) {
@@ -90,6 +88,7 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
           
           const isBankruptcy = lead.signal_types.includes('BANKRUPTCY')
           const isEmergency = lead.is_emergency || lead.signal_types.includes('EMERGENCY')
+          const hasPressure = isEmergency || lead.signal_count >= 3;
 
           const activeStyle = isEmergency ? EMERGENCY_STYLE : (isBankruptcy ? BANKRUPTCY_STYLE : null)
 
@@ -103,9 +102,9 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
                   padding: '16px',
                   height: '100%',
                   cursor: 'pointer',
-                  transition: 'all 0.15s ease-in-out',
                   position: 'relative',
-                  overflow: 'hidden'
+                  overflow: 'hidden',
+                  boxShadow: hasPressure ? '0 0 15px rgba(245, 158, 11, 0.1)' : 'none'
                 }}
               >
                 {activeStyle && (
@@ -113,36 +112,33 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
                     position: 'absolute',
                     top: 0,
                     right: 0,
-                    width: '40px',
-                    height: '40px',
+                    width: '32px',
+                    height: '32px',
                     background: `linear-gradient(45deg, transparent 50%, ${isEmergency ? '#ef4444' : '#f59e0b'} 50%)`,
                     opacity: 0.8
                   }} />
                 )}
 
-                <div style={{ marginBottom: '10px', display: 'flex', gap: '6px', alignItems: 'center' }}>
-                  <span style={{
-                    padding: '3px 10px',
-                    borderRadius: '6px',
-                    fontSize: '0.85rem',
-                    fontWeight: 700,
-                    background: scoreStyle.bg,
-                    color: scoreStyle.text,
-                  }}>
-                    {lead.score}
-                  </span>
-                  
-                  {activeStyle && (
+                <div style={{ marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                     <span style={{
-                      fontSize: '0.6rem',
-                      fontWeight: 800,
-                      textTransform: 'uppercase',
-                      color: activeStyle.text,
-                      letterSpacing: '0.02em'
+                      padding: '3px 10px',
+                      borderRadius: '6px',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
+                      background: scoreStyle.bg,
+                      color: scoreStyle.text,
                     }}>
-                      {isEmergency ? '⚠️ Emergency' : 'High Intent'}
+                      {lead.score}
                     </span>
-                  )}
+                    
+                    {hasPressure && (
+                      <div className="flex items-center gap-1 animate-pulse" style={{ color: '#d97706' }}>
+                        <Zap size={12} fill="#d97706" />
+                        <span style={{ fontSize: '0.6rem', fontWeight: 900, textTransform: 'uppercase' }}>Pressure</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <p style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-primary)', marginBottom: '2px' }}>
@@ -155,10 +151,10 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
 
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                   {reasons.map((r) => {
-                    // Logic to apply color coding to badges
-                    const isBankruptcyTag = r === 'bankruptcy filing';
-                    const isEmergencyTag = r === '🚨 EMERGENCY: SUBSTANDARD';
-                    const isAbsenteeTag = r === 'absentee owner';
+                    const isBankruptcyTag = r === 'bankruptcy';
+                    const isEmergencyTag = r.includes('EMERGENCY');
+                    const isAbsenteeTag = r === 'absentee';
+                    const isEnforcementTag = r === 'HIGH ENFORCEMENT';
 
                     let currentTagStyle = {
                       background: 'var(--bg-base)',
@@ -167,7 +163,9 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
                     };
 
                     if (isEmergencyTag) {
-                      currentTagStyle = { background: EMERGENCY_STYLE.badge.bg, color: EMERGENCY_STYLE.badge.text, border: `1px solid ${EMERGENCY_STYLE.badge.border}` };
+                      currentTagStyle = { background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca' };
+                    } else if (isEnforcementTag) {
+                      currentTagStyle = { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' };
                     } else if (isBankruptcyTag) {
                       currentTagStyle = { background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' };
                     } else if (isAbsenteeTag) {
@@ -177,10 +175,10 @@ export default function HotLeads({ leads }: { leads: HotLead[] }) {
                     return (
                       <span key={r} style={{
                         padding: '2px 7px',
-                        borderRadius: '9999px',
-                        fontSize: '0.65rem',
-                        fontWeight: 600,
-                        textTransform: 'uppercase', // Consistent button-like look
+                        borderRadius: '4px',
+                        fontSize: '0.55rem',
+                        fontWeight: 800,
+                        textTransform: 'uppercase',
                         ...currentTagStyle
                       }}>
                         {r}
