@@ -18,7 +18,7 @@ function adminClient() {
 }
 
 // ---------------------------------------------------------------------------
-// Data fetching
+// Data fetching (Restored to use your lead_scores table)
 // ---------------------------------------------------------------------------
 
 type PropertyRow = {
@@ -42,14 +42,12 @@ async function fetchProperties(
   const offset = (page - 1) * PAGE_SIZE
 
   if (scored) {
-    // Start from lead_scores (sorted by recency), dedupe, sort by score
     const { data: allScores } = await supabase
       .from('lead_scores')
       .select('property_id, score, signal_count')
       .gt('expires_at', new Date().toISOString())
       .order('scored_at', { ascending: false })
 
-    // Latest score per property
     const latestScores = new Map<string, { score: number; signal_count: number }>()
     for (const s of allScores ?? []) {
       if (!latestScores.has(s.property_id)) {
@@ -57,7 +55,6 @@ async function fetchProperties(
       }
     }
 
-    // Sort by score desc
     const sorted = [...latestScores.entries()].sort((a, b) => b[1].score - a[1].score)
     const total = sorted.length
     const pageIds = sorted.slice(offset, offset + PAGE_SIZE).map(([id]) => id)
@@ -89,7 +86,6 @@ async function fetchProperties(
     return { data, count: total }
   }
 
-  // Default: all properties sorted by assessed_value
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query: any = supabase
     .from('properties')
@@ -102,7 +98,6 @@ async function fetchProperties(
 
   const { data: properties, count } = await query
 
-  // Fetch scores for this page
   const ids = (properties ?? []).map((p: { id: string }) => p.id)
   const scoreMap = new Map<string, { score: number; signal_count: number }>()
   if (ids.length > 0) {
@@ -137,7 +132,6 @@ const getCachedProperties = unstable_cache(
 async function fetchHotLeads(): Promise<HotLead[]> {
   const supabase = adminClient()
 
-  // Get top scores (deduplicated to latest per property)
   const { data: allScores } = await supabase
     .from('lead_scores')
     .select('property_id, score, signal_count')
@@ -268,7 +262,6 @@ export default async function LeadsPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth/login')
 
-    // filters and presets
   const params = await searchParams;
   const type = params.type;
   const page = params.page;
@@ -331,7 +324,8 @@ export default async function LeadsPage({
             <table className="w-full" style={{ borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-base)' }}>
-                  {['Score', 'Address', 'Owner', 'Type', 'Value', ''].map((h) => (
+                  {/* Added "Signals" column here */}
+                  {['Score', 'Signals', 'Address', 'Owner', 'Type', 'Value', ''].map((h) => (
                     <th
                       key={h}
                       style={{
@@ -358,6 +352,10 @@ export default async function LeadsPage({
                   >
                     <td style={{ padding: '12px 16px', width: '64px' }}>
                       <ScoreBadge score={p.score} />
+                    </td>
+                    {/* Render the actual signal_count count here */}
+                    <td style={{ padding: '12px 16px', fontFamily: 'var(--font-data)', fontSize: '0.875rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                      {p.signal_count > 0 ? p.signal_count : '—'}
                     </td>
                     <td style={{ padding: '12px 16px' }}>
                       <Link

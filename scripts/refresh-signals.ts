@@ -1,13 +1,14 @@
 #!/usr/bin/env bun
 /**
  * Daily signals refresh — fetches code violations from Dallas Open Data (Socrata)
- * and upserts into the Supabase signals table.
+ * Enriches the data with Deal Engine intent scoring.
+ * Upserts into the Supabase signals table.
  *
  * Designed to be run on a schedule (cron, GitHub Actions, etc.).
  * Safe to re-run: ON CONFLICT (case_number) DO NOTHING skips duplicates.
  *
  * Usage:
- *   bun scripts/refresh-signals.ts [--days N] [--dry-run]
+ * bun scripts/refresh-signals.ts [--days N] [--dry-run]
  */
 
 import { sql } from "bun"
@@ -26,7 +27,7 @@ const daysArg = args[args.indexOf("--days") + 1]
 const lookbackDays = daysArg ? parseInt(daysArg, 10) : 14
 
 // ---------------------------------------------------------------------------
-// Socrata fetch
+// Interfaces
 // ---------------------------------------------------------------------------
 
 interface SocrataViolation {
@@ -43,6 +44,80 @@ interface SocrataViolation {
   status?: string
   [key: string]: unknown
 }
+
+interface EnrichmentData {
+  intent_score: number;
+  flags: string[];
+  is_high_priority: boolean;
+}
+
+interface SignalRow {
+  property_id: string
+  case_number: string
+  violation_type: string
+  filed_at: string
+  raw_data: string
+}
+
+// ---------------------------------------------------------------------------
+// Deal Engine Enrichment Engine
+// ---------------------------------------------------------------------------
+
+function enrichViolation(v: SocrataViolation): EnrichmentData {
+  // BASE SCORE: Every valid city complaint gets at least 1 point 
+  // so we can track chronic neglect over time.
+  let score = 1;
+  const flags: string[] = [];
+
+  const typeUpper = (v.service_request_type || "").toUpperCase();
+  const priorityUpper = (v.priority || "").toUpperCase();
+
+  // 1. Priority Checks
+  if (priorityUpper === "EMERGENCY") {
+    score += 50;
+    flags.push("EMERGENCY_ISSUE");
+  }
+
+  // 2. Absentee / Rental Checks
+  if (typeUpper.includes("SINGLE FAMILY RENTAL")) {
+    score += 40;
+    flags.push("ABSENTEE_LANDLORD_FLAG");
+  }
+
+  // 3. Structural Distress Checks
+  if (typeUpper.includes("SUBSTANDARD") || typeUpper.includes("VACANT") || typeUpper.includes("OPEN")) {
+    score += 50;
+    flags.push("SEVERE_STRUCTURAL_DISTRESS");
+  }
+
+  // 4. Deferred Maintenance Checks (Signs of giving up)
+  if (typeUpper.includes("WEEDS") || typeUpper.includes("JUNK MOTOR") || typeUpper.includes("LITTER")) {
+    score += 15;
+    flags.push("DEFERRED_MAINTENANCE");
+  }
+
+  // 5. City Intervention (City having to mow or board up the house creates liens)
+  if (typeUpper.includes("DECORATIVE BOARD UP") || typeUpper.includes("ABATEMENT")) {
+    score += 60;
+    flags.push("CITY_ABATEMENT_LIEN_RISK");
+  }
+
+  // 6. The General Catch-All
+  if (flags.length === 0) {
+    flags.push("GENERAL_NUISANCE");
+  }
+
+  return {
+    intent_score: score,
+    flags: flags,
+    // Set your "hot lead" threshold here
+    is_high_priority: score >= 40 
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Socrata fetch
+// ---------------------------------------------------------------------------
 
 async function fetchViolations(): Promise<SocrataViolation[]> {
   const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000)
@@ -65,7 +140,7 @@ async function fetchViolations(): Promise<SocrataViolation[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Property lookup (same prefix-match strategy as Python pipeline)
+// Property lookup (Prefix-match strategy)
 // ---------------------------------------------------------------------------
 
 function esc(s: string | null): string {
@@ -115,16 +190,9 @@ async function lookupPropertyIds(addresses: string[]): Promise<Map<string, strin
 // Upsert
 // ---------------------------------------------------------------------------
 
-interface SignalRow {
-  property_id: string
-  case_number: string
-  violation_type: string
-  filed_at: string
-  raw_data: string
-}
-
 async function upsertBatch(batch: SignalRow[]): Promise<void> {
-  const rows = batch
+  // 1. First, insert the raw signals
+  const signalRows = batch
     .map(s =>
       `(gen_random_uuid(),${esc(s.property_id)},'CODE_VIOLATION','Dallas 311',${esc(s.case_number)},${esc(s.filed_at)},'${s.raw_data.replace(/'/g, "''")}'::jsonb,now())`
     )
@@ -132,8 +200,25 @@ async function upsertBatch(batch: SignalRow[]): Promise<void> {
 
   await sql.unsafe(`
     INSERT INTO signals (id, property_id, signal_type, source, case_number, filed_at, raw_data, created_at)
-    VALUES ${rows}
+    VALUES ${signalRows}
     ON CONFLICT (case_number) WHERE case_number IS NOT NULL DO NOTHING
+  `)
+
+  // 2. Second, insert the LEAD SCORES so they show up in the UI
+  // We extract the score from the JSON we just created
+  const scoreRows = batch
+    .map(s => {
+      const data = JSON.parse(s.raw_data);
+      const score = data.deal_engine.intent_score;
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      
+      return `(${esc(s.property_id)}, ${score}, 1, now(), '${expiresAt}')`
+    })
+    .join(",")
+
+  await sql.unsafe(`
+    INSERT INTO lead_scores (property_id, score, signal_count, scored_at, expires_at)
+    VALUES ${scoreRows}
   `)
 }
 
@@ -167,14 +252,28 @@ async function main() {
     const propertyId = propertyMap.get(addr.toUpperCase())
     if (!propertyId) { skipped++; continue }
 
+    // --- RUN ENRICHMENT ---
+    const enrichment = enrichViolation(v);
+
+    // Create a new payload that combines the raw Socrata data with Deal Engine logic
+    const enrichedPayload = {
+      ...v,
+      deal_engine: {
+        ...enrichment,
+        processed_at: new Date().toISOString()
+      }
+    };
+
     const detail =
       v.outcome ??
       v.description ??
       `Priority: ${v.priority ?? "?"} | Dist: ${v.city_council_district ?? "?"}`
-    const violationType = `${v.service_request_type} (${detail})`
+    
+    // Optional: Append the score to the violation_type string so it's instantly visible in your DB
+    const violationType = `[Score: ${enrichment.intent_score}] ${v.service_request_type} (${detail})`
 
     if (dryRun) {
-      console.log({ property_id: propertyId, case_number: v.service_request_number, violationType, filed_at: v.created_date })
+      console.log(`[Score: ${enrichment.intent_score}] ${addr} | Flags: ${enrichment.flags.join(", ")}`);
       upserted++
       continue
     }
@@ -184,7 +283,8 @@ async function main() {
       case_number: v.service_request_number,
       violation_type: violationType,
       filed_at: v.created_date,
-      raw_data: JSON.stringify(v),
+      // Save the enriched JSON, not just the raw Socrata JSON
+      raw_data: JSON.stringify(enrichedPayload),
     })
     upserted++
 
