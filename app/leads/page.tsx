@@ -17,10 +17,6 @@ function adminClient() {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Data fetching (Restored to use your lead_scores table)
-// ---------------------------------------------------------------------------
-
 type PropertyRow = {
   id: string
   property_address: string
@@ -32,6 +28,10 @@ type PropertyRow = {
   signal_count: number
 }
 
+/**
+ * REFACTORED: Uses SQL Joins to handle high-volume scoring without 
+ * memory bottlenecks or "hidden" 55-point leads.
+ */
 async function fetchProperties(
   type: string | undefined,
   absentee: boolean,
@@ -41,86 +41,45 @@ async function fetchProperties(
   const supabase = adminClient()
   const offset = (page - 1) * PAGE_SIZE
 
-  if (scored) {
-    const { data: allScores } = await supabase
-      .from('lead_scores')
-      .select('property_id, score, signal_count')
-      .gt('expires_at', new Date().toISOString())
-      .order('scored_at', { ascending: false })
-
-    const latestScores = new Map<string, { score: number; signal_count: number }>()
-    for (const s of allScores ?? []) {
-      if (!latestScores.has(s.property_id)) {
-        latestScores.set(s.property_id, { score: s.score, signal_count: s.signal_count })
-      }
-    }
-
-    const sorted = [...latestScores.entries()].sort((a, b) => b[1].score - a[1].score)
-    const total = sorted.length
-    const pageIds = sorted.slice(offset, offset + PAGE_SIZE).map(([id]) => id)
-
-    if (pageIds.length === 0) return { data: [], count: total }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let propQuery: any = supabase
-      .from('properties')
-      .select('id, property_address, owner_name, ownership_type, assessed_value, is_absentee')
-      .in('id', pageIds)
-
-    if (type && type !== 'ALL') propQuery = propQuery.eq('ownership_type', type as OwnershipType)
-    if (absentee) propQuery = propQuery.eq('is_absentee', true)
-
-    const { data: properties } = await propQuery
-    const idOrder = new Map(pageIds.map((id, i) => [id, i]))
-
-    const data: PropertyRow[] = (properties ?? [])
-      .map((p: Omit<PropertyRow, 'score' | 'signal_count'>) => ({
-        ...p,
-        score: latestScores.get(p.id)?.score ?? null,
-        signal_count: latestScores.get(p.id)?.signal_count ?? 0,
-      }))
-      .sort((a: PropertyRow, b: PropertyRow) =>
-        (idOrder.get(a.id) ?? 999) - (idOrder.get(b.id) ?? 999)
+  // Base query selecting from lead_scores to ensure we only get "Active" leads
+  let query = supabase
+    .from('lead_scores')
+    .select(`
+      score,
+      signal_count,
+      property:properties!inner (
+        id,
+        property_address,
+        owner_name,
+        ownership_type,
+        assessed_value,
+        is_absentee
       )
-
-    return { data, count: total }
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let query: any = supabase
-    .from('properties')
-    .select('id, property_address, owner_name, ownership_type, assessed_value, is_absentee', { count: 'exact' })
-    .order('assessed_value', { ascending: false, nullsFirst: false })
+    `, { count: 'exact' })
+    .gt('expires_at', new Date().toISOString())
+    .order('score', { ascending: false })
+    .order('scored_at', { ascending: false }) // Tie-breaker for the 55s
     .range(offset, offset + PAGE_SIZE - 1)
 
-  if (type && type !== 'ALL') query = query.eq('ownership_type', type as OwnershipType)
-  if (absentee) query = query.eq('is_absentee', true)
+  // Apply Filters
+  if (type && type !== 'ALL') query = query.eq('properties.ownership_type', type)
+  if (absentee) query = query.eq('properties.is_absentee', true)
 
-  const { data: properties, count } = await query
+  const { data, count, error } = await query
 
-  const ids = (properties ?? []).map((p: { id: string }) => p.id)
-  const scoreMap = new Map<string, { score: number; signal_count: number }>()
-  if (ids.length > 0) {
-    const { data: scores } = await supabase
-      .from('lead_scores')
-      .select('property_id, score, signal_count')
-      .in('property_id', ids)
-      .gt('expires_at', new Date().toISOString())
-      .order('scored_at', { ascending: false })
-    for (const s of scores ?? []) {
-      if (!scoreMap.has(s.property_id)) {
-        scoreMap.set(s.property_id, { score: s.score, signal_count: s.signal_count })
-      }
-    }
+  if (error) {
+    console.error('Fetch Error:', error)
+    return { data: [], count: 0 }
   }
 
-  const data: PropertyRow[] = (properties ?? []).map((p: Omit<PropertyRow, 'score' | 'signal_count'>) => ({
-    ...p,
-    score: scoreMap.get(p.id)?.score ?? null,
-    signal_count: scoreMap.get(p.id)?.signal_count ?? 0,
+  // Flatten the nested join structure for the UI
+  const flattened: PropertyRow[] = (data ?? []).map((row: any) => ({
+    ...row.property,
+    score: row.score,
+    signal_count: row.signal_count
   }))
 
-  return { data, count: count ?? 0 }
+  return { data: flattened, count: count ?? 0 }
 }
 
 const getCachedProperties = unstable_cache(
@@ -129,33 +88,35 @@ const getCachedProperties = unstable_cache(
   { revalidate: 300, tags: ['properties-list'] },
 )
 
+/**
+ * Fetches the top 10 leads for the "Bubbles" section.
+ */
 async function fetchHotLeads(): Promise<HotLead[]> {
   const supabase = adminClient()
 
-  const { data: allScores } = await supabase
+  const { data: scores } = await supabase
     .from('lead_scores')
-    .select('property_id, score, signal_count')
+    .select(`
+      score,
+      signal_count,
+      property:properties!inner (
+        id,
+        property_address,
+        owner_name,
+        ownership_type,
+        assessed_value,
+        is_absentee
+      )
+    `)
     .gt('expires_at', new Date().toISOString())
-    .order('scored_at', { ascending: false })
+    .order('score', { ascending: false })
+    .limit(10)
 
-  const latest = new Map<string, { score: number; signal_count: number }>()
-  for (const s of allScores ?? []) {
-    if (!latest.has(s.property_id)) latest.set(s.property_id, s)
-  }
+  if (!scores) return []
 
-  const top = [...latest.entries()]
-    .sort((a, b) => b[1].score - a[1].score)
-    .slice(0, 10)
+  const ids = scores.map(s => s.property.id)
 
-  if (top.length === 0) return []
-
-  const ids = top.map(([id]) => id)
-
-  const { data: properties } = await supabase
-    .from('properties')
-    .select('id, property_address, owner_name, ownership_type, assessed_value, is_absentee')
-    .in('id', ids)
-
+  // Fetch recent signal types for the badges
   const { data: signals } = await supabase
     .from('signals')
     .select('property_id, signal_type')
@@ -168,16 +129,12 @@ async function fetchHotLeads(): Promise<HotLead[]> {
     signalsByProp.get(s.property_id)!.push(s.signal_type)
   }
 
-  const scoreOrder = new Map(top.map(([id], i) => [id, i]))
-
-  return (properties ?? [])
-    .map((p): HotLead => ({
-      ...p,
-      score: latest.get(p.id)!.score,
-      signal_count: latest.get(p.id)!.signal_count,
-      signal_types: [...new Set(signalsByProp.get(p.id) ?? [])],
-    }))
-    .sort((a, b) => (scoreOrder.get(a.id) ?? 9) - (scoreOrder.get(b.id) ?? 9))
+  return scores.map((s: any): HotLead => ({
+    ...s.property,
+    score: s.score,
+    signal_count: s.signal_count,
+    signal_types: [...new Set(signalsByProp.get(s.property.id) ?? [])],
+  }))
 }
 
 const getCachedHotLeads = unstable_cache(
@@ -186,14 +143,12 @@ const getCachedHotLeads = unstable_cache(
   { revalidate: 300 },
 )
 
-// ---------------------------------------------------------------------------
-// Components
-// ---------------------------------------------------------------------------
+// --- Styling & Badges ---
 
 const TYPE_STYLES: Record<string, { bg: string; text: string }> = {
   LLC:        { bg: 'var(--tag-code-bg)',    text: 'var(--tag-code-text)' },
   TRUST:      { bg: 'var(--tag-trust-bg)',   text: 'var(--tag-trust-text)' },
-  ESTATE:     { bg: 'var(--tag-divorce-bg)', text: 'var(--tag-divorce-text)' },
+  ESTATE:     { bg: '#f3e8ff',               text: '#7e22ce' }, // Standardized Purple
   INDIVIDUAL: { bg: 'var(--bg-base)',        text: 'var(--text-muted)' },
 }
 
@@ -224,9 +179,10 @@ function ScoreBadge({ score }: { score: number | null }) {
   )
 }
 
-function TypeBadge({ type }: { type: string | null }) {
-  if (!type) return null
-  const s = TYPE_STYLES[type] ?? TYPE_STYLES.INDIVIDUAL
+function TypeBadge({ type, owner }: { type: string | null; owner: string | null }) {
+  const isEstate = type === 'ESTATE' || owner?.includes('EST OF')
+  const s = isEstate ? TYPE_STYLES.ESTATE : (TYPE_STYLES[type || ''] ?? TYPE_STYLES.INDIVIDUAL)
+  
   return (
     <span style={{
       display: 'inline-block',
@@ -237,20 +193,9 @@ function TypeBadge({ type }: { type: string | null }) {
       background: s.bg,
       color: s.text,
     }}>
-      {type}
+      {isEstate ? 'ESTATE' : (type ?? 'INDIVIDUAL')}
     </span>
   )
-}
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
-
-interface SearchParams {
-  type?: string
-  absentee?: string
-  scored?: string
-  page?: string
 }
 
 export default async function LeadsPage({
@@ -262,18 +207,17 @@ export default async function LeadsPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth/login')
 
-  const params = await searchParams;
-  const type = params.type;
-  const page = params.page;
-  const scored = params.scored ?? '1';
-  const absentee = params.absentee ?? '1';
-
-  const currentPage = Math.max(1, parseInt(page ?? '1', 10))
+  const params = await searchParams
+  const type = params.type
+  const scored = params.scored ?? '1'
+  const absentee = params.absentee ?? '1'
+  const currentPage = Math.max(1, parseInt(params.page ?? '1', 10))
 
   const [{ data: properties, count }, hotLeads] = await Promise.all([
     getCachedProperties(type, absentee === '1', scored === '1', currentPage),
     getCachedHotLeads(),
   ])
+
   const total = count ?? 0
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
@@ -283,159 +227,76 @@ export default async function LeadsPage({
     if (absentee === '1') params.set('absentee', '1')
     if (scored === '1') params.set('scored', '1')
     if (p > 1) params.set('page', String(p))
-    const qs = params.toString()
-    return `/leads${qs ? `?${qs}` : ''}`
+    return `/leads?${params.toString()}`
   }
 
   return (
     <main className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
       <div className="max-w-6xl mx-auto px-6 py-8">
-
-        <header className="mb-6">
-          <h1
-            className="text-2xl font-semibold"
-            style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-ui)' }}
-          >
-            Deal Finder
-          </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '4px' }}>
-            Dallas residential parcels
-          </p>
+        
+        <header className="mb-6 flex justify-between items-end">
+          <div>
+            <h1 className="text-2xl font-semibold" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-ui)' }}>
+              Deal Engine
+            </h1>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+              High-intent Dallas residential leads
+            </p>
+          </div>
+          <div style={{ fontFamily: 'var(--font-data)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            Showing {properties.length} of {total.toLocaleString()} leads
+          </div>
         </header>
 
         <HotLeads leads={hotLeads} />
 
-        <FilterBar
-          activeType={type ?? 'ALL'}
-          absentee={absentee === '1'}
-          scored={scored === '1'}
-          total={total}
-        />
+        <FilterBar activeType={type ?? 'ALL'} absentee={absentee === '1'} scored={scored === '1'} total={total} />
 
-        <div
-          className="rounded-lg border overflow-hidden"
-          style={{ borderColor: 'var(--border)', background: 'var(--bg-surface)' }}
-        >
-          {properties.length === 0 ? (
-            <div className="p-12 text-center" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-data)' }}>
-              No properties match these filters.
-            </div>
-          ) : (
-            <table className="w-full" style={{ borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-base)' }}>
-                  {/* Added "Signals" column here */}
-                  {['Score', 'Signals', 'Address', 'Owner', 'Type', 'Value', ''].map((h) => (
-                    <th
-                      key={h}
-                      style={{
-                        padding: '10px 16px',
-                        textAlign: 'left',
-                        fontSize: '0.7rem',
-                        fontWeight: 600,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        color: 'var(--text-muted)',
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {properties.map((p) => (
-                  <tr
-                    key={p.id}
-                    style={{ borderBottom: '1px solid var(--border)' }}
-                    className="hover:bg-[var(--bg-base)] transition-colors"
-                  >
-                    <td style={{ padding: '12px 16px', width: '64px' }}>
-                      <ScoreBadge score={p.score} />
-                    </td>
-                    {/* Render the actual signal_count count here */}
-                    <td style={{ padding: '12px 16px', fontFamily: 'var(--font-data)', fontSize: '0.875rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
-                      {p.signal_count > 0 ? p.signal_count : '—'}
-                    </td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <Link
-                        href={`/leads/${p.id}`}
-                        style={{
-                          fontWeight: 500,
-                          color: 'var(--text-primary)',
-                          textDecoration: 'none',
-                          fontSize: '0.875rem',
-                        }}
-                      >
-                        {p.property_address}
-                      </Link>
-                    </td>
-                    <td style={{ padding: '12px 16px', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                      {p.owner_name ?? '—'}
-                    </td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <TypeBadge type={p.ownership_type} />
-                    </td>
-                    <td style={{ padding: '12px 16px', fontFamily: 'var(--font-data)', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                      {p.assessed_value != null ? `$${p.assessed_value.toLocaleString()}` : '—'}
-                    </td>
-                    <td style={{ padding: '12px 16px' }}>
-                      {p.is_absentee && (
-                        <span style={{
-                          display: 'inline-block',
-                          padding: '1px 7px',
-                          borderRadius: '9999px',
-                          fontSize: '0.7rem',
-                          fontWeight: 600,
-                          background: 'var(--tag-absentee-bg)',
-                          color: 'var(--tag-absentee-text)',
-                        }}>
-                          absentee
-                        </span>
-                      )}
-                    </td>
-                  </tr>
+        <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)', background: 'var(--bg-surface)' }}>
+          <table className="w-full text-left" style={{ borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)' }}>
+                {['Score', 'Signals', 'Address', 'Owner', 'Type', 'Value', ''].map(h => (
+                  <th key={h} style={{ padding: '12px 16px', fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{h}</th>
                 ))}
-              </tbody>
-            </table>
-          )}
+              </tr>
+            </thead>
+            <tbody>
+  {properties.map((p, index) => (
+    <tr 
+      key={`${p.id}-${index}`} // Composite key prevents React rendering collisions
+      className="hover:bg-[var(--bg-base)] transition-colors" 
+      style={{ borderBottom: '1px solid var(--border)' }}
+    >
+      <td style={{ padding: '12px 16px' }}><ScoreBadge score={p.score} /></td>
+      <td style={{ padding: '12px 16px', fontFamily: 'var(--font-data)', fontSize: '0.85rem' }}>
+        {p.signal_count > 0 ? `🔥 ${p.signal_count}` : '—'}
+      </td>
+      <td style={{ padding: '12px 16px' }}>
+        <Link href={`/leads/${p.id}`} style={{ fontWeight: 600, color: 'var(--text-primary)', textDecoration: 'none', fontSize: '0.875rem' }}>
+          {p.property_address}
+        </Link>
+      </td>
+      <td style={{ padding: '12px 16px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{p.owner_name}</td>
+      <td style={{ padding: '12px 16px' }}><TypeBadge type={p.ownership_type} owner={p.owner_name} /></td>
+      <td style={{ padding: '12px 16px', fontFamily: 'var(--font-data)', fontSize: '0.8rem' }}>
+        {p.assessed_value ? `$${p.assessed_value.toLocaleString()}` : '—'}
+      </td>
+      <td style={{ padding: '12px 16px' }}>
+        {p.is_absentee && <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase">absentee</span>}
+      </td>
+    </tr>
+  ))}
+</tbody>
+          </table>
         </div>
 
+        {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between mt-5">
-            <Link
-              href={buildUrl(currentPage - 1)}
-              style={{
-                padding: '6px 14px',
-                borderRadius: '6px',
-                border: '1px solid var(--border)',
-                fontSize: '0.8rem',
-                color: currentPage <= 1 ? 'var(--text-muted)' : 'var(--text-secondary)',
-                pointerEvents: currentPage <= 1 ? 'none' : 'auto',
-                background: 'var(--bg-surface)',
-                textDecoration: 'none',
-              }}
-            >
-              ← Previous
-            </Link>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'var(--font-data)' }}>
-              {currentPage.toLocaleString()} / {totalPages.toLocaleString()}
-            </span>
-            <Link
-              href={buildUrl(currentPage + 1)}
-              style={{
-                padding: '6px 14px',
-                borderRadius: '6px',
-                border: '1px solid var(--border)',
-                fontSize: '0.8rem',
-                color: currentPage >= totalPages ? 'var(--text-muted)' : 'var(--text-secondary)',
-                pointerEvents: currentPage >= totalPages ? 'none' : 'auto',
-                background: 'var(--bg-surface)',
-                textDecoration: 'none',
-              }}
-            >
-              Next →
-            </Link>
+          <div className="flex justify-center gap-4 mt-8">
+            <Link href={buildUrl(currentPage - 1)} className={currentPage === 1 ? 'pointer-events-none opacity-50' : ''}>Previous</Link>
+            <span className="font-mono text-sm">{currentPage} / {totalPages}</span>
+            <Link href={buildUrl(currentPage + 1)} className={currentPage === totalPages ? 'pointer-events-none opacity-50' : ''}>Next</Link>
           </div>
         )}
       </div>
