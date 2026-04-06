@@ -207,6 +207,44 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         </header>
 
         <HotLeads leads={hotLeads} />
+
+        {/* Score Explanation */}
+        <details className="mb-6 p-4 rounded-lg border" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border)', cursor: 'pointer' }}>
+          <summary style={{ fontWeight: 600, fontSize: '0.8rem', color: 'var(--text-secondary)', listStyle: 'none', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '1rem' }}>ℹ️</span> How scores work
+          </summary>
+          <div style={{ marginTop: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            <p style={{ marginBottom: '10px' }}>
+              Scores (0-100) predict seller motivation based on distress signals.
+            </p>
+            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '12px', fontSize: '0.75rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ textAlign: 'left', padding: '6px', color: 'var(--text-muted)' }}>Signal</th>
+                  <th style={{ textAlign: 'left', padding: '6px', color: 'var(--text-muted)' }}>Points</th>
+                  <th style={{ textAlign: 'left', padding: '6px', color: 'var(--text-muted)' }}>Signal</th>
+                  <th style={{ textAlign: 'left', padding: '6px', color: 'var(--text-muted)' }}>Points</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td style={{ padding: '4px 6px' }}>Foreclosure</td><td style={{ padding: '4px 6px' }}>40</td><td style={{ padding: '4px 6px' }}>Tax Delinq.</td><td style={{ padding: '4px 6px' }}>30</td></tr>
+                <tr><td style={{ padding: '4px 6px' }}>Bankruptcy</td><td style={{ padding: '4px 6px' }}>35</td><td style={{ padding: '4px 6px' }}>Code Viol.</td><td style={{ padding: '4px 6px' }}>20</td></tr>
+                <tr><td style={{ padding: '4px 6px' }}>Divorce</td><td style={{ padding: '4px 6px' }}>35</td><td style={{ padding: '4px 6px' }}>Vacant</td><td style={{ padding: '4px 6px' }}>15</td></tr>
+                <tr><td style={{ padding: '4px 6px' }}>Emergency</td><td style={{ padding: '4px 6px' }}>100</td><td style={{ padding: '4px 6px' }}>Diversity bonus</td><td style={{ padding: '4px 6px' }}>+10</td></tr>
+              </tbody>
+            </table>
+            <p style={{ marginBottom: '8px' }}>
+              <strong>Bonuses:</strong> +15 for absentee owners, +10 for 2+ signal types
+            </p>
+            <p style={{ marginBottom: '8px' }}>
+              <strong>Multipliers:</strong> ESTATE ×1.2, TRUST ×1.15, LLC ×1.1, INDIVIDUAL ×1.0
+            </p>
+            <p>
+              <strong>Bands:</strong> ≥70 = High (black), ≥50 = Medium (gray), {'<50'} = Low
+            </p>
+          </div>
+        </details>
+
         <FilterBar activeType={type ?? 'ALL'} absentee={absentee === '1'} scored={scored === '1'} total={total} />
 
         <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)', background: 'var(--bg-surface)' }}>
